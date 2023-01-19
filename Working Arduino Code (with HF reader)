@@ -1,0 +1,326 @@
+Pins: 
+HF RFID: 
+	SDA to digital 10
+	SCK to 13
+	MOSI to 11
+	MISO to 12
+	GND to GND
+	RST to 9
+	3.3V to 3V
+
+RTC: 
+	SDA to A4 
+	SLA to A5
+	Vin to 5V
+	GND to GND
+
+SD Card: 
+	GRD to GRD
+	VCC to 5V
+	MISO to 12
+	MOSI to 11
+	SCK to 13
+	CS to 4
+
+IR Beams: 
+	White to 5
+	Power to 3.3V
+	GDN to GND
+
+Temperature
+	GND to GND
+	VCC to 5V
+	DO to 7
+	CS to 6
+	CLK to 8
+
+
+#include <MFRC522.h> // for the RFID
+#include <SPI.h> // for the RFID and SD card module
+#include <SD.h> // for the SD card
+#include <RTClib.h> // for the RTC
+#include "max6675.h" // for the thermocouple
+
+// define pins for RFID
+#define CS_RFID 10
+#define RST_RFID 9
+// define select pin for SD card module
+#define CS_SD 4 
+
+// Create a file to store the data
+File myFile;
+
+// Instance of the class for RFID
+MFRC522 rfid(CS_RFID, RST_RFID); 
+
+// Variable to hold the tag's UID
+String uidString;
+
+// Instance of the class for RTC
+RTC_DS3231 rtc;
+char t[32];
+
+//IR Beam
+#define SENSORPIN 5
+int sensorState = 0, lastState=0;  
+
+//define pins for thermocouple
+int thermoDO = 7;
+int thermoCS = 6;
+int thermoCLK = 8;
+MAX6675 thermocouple(thermoCLK, thermoCS, thermoDO);
+//DateTime now;
+//uint8_t previousHour;
+
+void setup() {
+  
+  // Init Serial port
+  Serial.begin(9600);
+  
+  // Init SPI bus
+  SPI.begin(); 
+  // Init MFRC522 
+  rfid.PCD_Init(); 
+
+  // Setup for the SD card
+  Serial.print("Initializing SD card...");
+  if(!SD.begin(CS_SD)) {
+    Serial.println("initialization failed!");
+    return;
+  }
+  Serial.println("initialization done.");
+
+  // Setup for the RTC  
+  Serial.begin(9600);
+  Wire.begin();
+  rtc.begin();
+  rtc.adjust(DateTime(F(__DATE__),F(__TIME__)));   
+
+  // initialize the IR sensor pin as an input
+  pinMode(SENSORPIN, INPUT);     
+  digitalWrite(SENSORPIN, HIGH); // turn on the pullup
+
+  // Testing thermocouple
+  Serial.begin(9600);
+  Serial.println("MAX6675 test");
+  // wait for MAX chip to stabilize
+  delay(500);
+
+}
+
+void loop() {
+  // read the state of the pushbutton value:
+  sensorState = digitalRead(SENSORPIN);
+  if (sensorState == LOW) {     
+    Serial.print("Broken");
+    readTime();
+    logBeam();
+  }
+
+  //look for new cards
+  if(rfid.PICC_IsNewCardPresent()) {
+    readRFID();
+    readTime();
+    logCard();
+  }
+
+
+//read temperature every hour
+//tried to make it more clean but the commented out code below didn't work
+  //now = rtc.now();
+  //previousHour = now.hour();
+  //if(now.hour()!=previousHour){
+  //Serial.print("C = "); 
+  //Serial.println(thermocouple.readCelsius());
+  DateTime now = rtc.now();
+ if(now.hour() == 0 & now.minute() == 0 & now.second() == 0 || now.hour() == 1 & now.minute() == 0 & now.second() == 0 
+    || now.hour() == 2 & now.minute() == 0 & now.second() == 0 || now.hour() == 3 & now.minute() == 0 & now.second() == 0
+    || now.hour() == 4 & now.minute() == 0 & now.second() == 0 || now.hour() == 5 & now.minute() == 0 & now.second() == 0
+    || now.hour() == 6 & now.minute() == 0 & now.second() == 0 || now.hour() == 7 & now.minute() == 0 & now.second() == 0
+    || now.hour() == 8 & now.minute() == 0 & now.second() == 0 || now.hour() == 9 & now.minute() == 0 & now.second() == 0
+    || now.hour() == 10 & now.minute() == 0 & now.second() == 0 || now.hour() == 11 & now.minute() == 0 & now.second() == 0
+    || now.hour() == 12 & now.minute() == 0 & now.second() == 0 || now.hour() == 13 & now.minute() == 0 & now.second() == 0
+    || now.hour() == 14 & now.minute() == 0 & now.second() == 0 || now.hour() == 15 & now.minute() == 0 & now.second() == 0
+    || now.hour() == 16 & now.minute() == 0 & now.second() == 0 || now.hour() == 17 & now.minute() == 0 & now.second() == 0
+    || now.hour() == 18 & now.minute() == 0 & now.second() == 0 || now.hour() == 19 & now.minute() == 0 & now.second() == 0
+    || now.hour() == 20 & now.minute() == 0 & now.second() == 0 || now.hour() == 21 & now.minute() == 0 & now.second() == 0
+    || now.hour() == 22 & now.minute() == 0 & now.second() == 0 || now.hour() == 23 & now.minute() == 0 & now.second() == 0){
+ logTemp();
+ delay(1000);
+ }
+}
+
+void readRFID() {
+  rfid.PICC_ReadCardSerial();
+  Serial.print("Tag UID: ");
+  uidString = String(rfid.uid.uidByte[0]) + " " + String(rfid.uid.uidByte[1]) + " " + 
+    String(rfid.uid.uidByte[2]) + " " + String(rfid.uid.uidByte[3]);
+  Serial.println(uidString);
+  delay(100);
+}
+
+ void readTime() { 
+  DateTime now = rtc.now();
+  sprintf(t, "%02d:%02d:%02d %02d/%02d/%02d", now.hour(), now.minute(), now.second(), now.day(), now.month(), now.year());  
+  Serial.print(F("Date/Time: "));
+  Serial.println(t);
+  delay(100);
+ }
+
+void logCard() {
+  // Enables SD card chip select pin
+  digitalWrite(CS_SD,LOW);
+  
+  // Open file
+  myFile=SD.open("DATA.txt", FILE_WRITE);
+
+  // If the file opened ok, write to it
+  if (myFile) {
+    Serial.println("File opened ok");
+    myFile.print(uidString);
+    myFile.print(", ");   
+    
+    // Save time on SD card
+    DateTime now = rtc.now();
+    myFile.print(now.year(), DEC);
+    myFile.print('/');
+    myFile.print(now.month(), DEC);
+    myFile.print('/');
+    myFile.print(now.day(), DEC);
+    myFile.print(',');
+    myFile.print(now.hour(), DEC);
+    myFile.print(':');
+    myFile.print(now.minute(), DEC);
+    myFile.print(':');
+    myFile.print(now.second(), DEC);
+    
+    // Print time on Serial monitor
+    Serial.print(now.year(), DEC);
+    Serial.print('/');
+    Serial.print(now.month(), DEC);
+    Serial.print('/');
+    Serial.print(now.day(), DEC);
+    Serial.print(' ');
+    Serial.print(now.hour(), DEC);
+    Serial.print(':');
+    Serial.print(now.minute(), DEC);
+    Serial.print(':');
+    Serial.print(now.second(), DEC);
+    Serial.println(' ');
+    Serial.println("sucessfully written on SD card");
+    myFile.close();
+
+  }
+  else {
+    Serial.println("error opening data.txt");  
+  }
+  // Disables SD card chip select pin  
+  digitalWrite(CS_SD,HIGH);
+}
+
+void logBeam() {
+  // Enables SD card chip select pin
+  digitalWrite(CS_SD,LOW);
+  
+  // Open file
+  myFile=SD.open("DATA.txt", FILE_WRITE);
+
+  // If the file opened ok, write to it
+  if (myFile) {
+    Serial.println("File opened ok");
+    myFile.print("Broken");
+    myFile.print(", ");   
+    
+    // Save time on SD card
+    DateTime now = rtc.now();
+    myFile.print(now.year(), DEC);
+    myFile.print('/');
+    myFile.print(now.month(), DEC);
+    myFile.print('/');
+    myFile.print(now.day(), DEC);
+    myFile.print(',');
+    myFile.print(now.hour(), DEC);
+    myFile.print(':');
+    myFile.print(now.minute(), DEC);
+    myFile.print(':');
+    myFile.print(now.second(), DEC);
+    
+    // Print time on Serial monitor
+    Serial.print(now.year(), DEC);
+    Serial.print('/');
+    Serial.print(now.month(), DEC);
+    Serial.print('/');
+    Serial.print(now.day(), DEC);
+    Serial.print(' ');
+    Serial.print(now.hour(), DEC);
+    Serial.print(':');
+    Serial.print(now.minute(), DEC);
+    Serial.print(':');
+    Serial.print(now.second(), DEC);
+    Serial.println(' ');
+    Serial.println("sucessfully written on SD card");
+    myFile.close();
+
+  }
+  else {
+    Serial.println("error opening data.txt");  
+  }
+  // Disables SD card chip select pin  
+  digitalWrite(CS_SD,HIGH);
+}
+
+//logging temp to SD card
+void logTemp() {
+  Serial.print("C = "); 
+  Serial.println(thermocouple.readCelsius());
+
+  // Enables SD card chip select pin
+  digitalWrite(CS_SD,LOW);
+  
+  // Open file
+  myFile=SD.open("DATA.txt", FILE_WRITE);
+
+  // If the file opened ok, write to it
+  if (myFile) {
+    Serial.println("File opened ok");
+    myFile.print("C = "); 
+    myFile.println(thermocouple.readCelsius());
+    myFile.print(", ");   
+    
+    // Save time on SD card
+    DateTime now = rtc.now();
+    myFile.print(now.year(), DEC);
+    myFile.print('/');
+    myFile.print(now.month(), DEC);
+    myFile.print('/');
+    myFile.print(now.day(), DEC);
+    myFile.print(',');
+    myFile.print(now.hour(), DEC);
+    myFile.print(':');
+    myFile.print(now.minute(), DEC);
+    myFile.print(':');
+    myFile.print(now.second(), DEC);
+    
+    // Print time on Serial monitor
+    Serial.print(now.year(), DEC);
+    Serial.print('/');
+    Serial.print(now.month(), DEC);
+    Serial.print('/');
+    Serial.print(now.day(), DEC);
+    Serial.print(' ');
+    Serial.print(now.hour(), DEC);
+    Serial.print(':');
+    Serial.print(now.minute(), DEC);
+    Serial.print(':');
+    Serial.print(now.second(), DEC);
+    Serial.println(' ');
+    Serial.println("sucessfully written on SD card");
+    myFile.close();
+
+  }
+  else {
+    Serial.println("error opening data.txt");  
+  }
+  // Disables SD card chip select pin  
+  digitalWrite(CS_SD,HIGH);
+}
